@@ -1,365 +1,282 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Navbar } from "@/components/Navbar"
 import { Footer } from "@/components/Footer"
-import { StatCard } from "@/components/StatCard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ComposedChart,
-  Area,
-  AreaChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ComposedChart, Area, Line, BarChart, Bar,
 } from "recharts"
-import { Search, TrendingUp, TrendingDown, Activity, Volume2 } from "lucide-react"
-
-/**
- * Stock Analysis Page
- * 
- * Core feature page for detailed stock analysis and visualization.
- * 
- * Design: Modern Financial Minimalism
- * - Clean data presentation with charts
- * - Real-time metrics and indicators
- * - Responsive grid layout
- * - Interactive chart interactions
- */
-
-// Sample data for demonstration
-const chartData = [
-  { date: "Jan 1", price: 150.2, volume: 2400, ma20: 148.5 },
-  { date: "Jan 2", price: 152.1, volume: 2210, ma20: 149.2 },
-  { date: "Jan 3", price: 151.8, volume: 2290, ma20: 150.1 },
-  { date: "Jan 4", price: 154.3, volume: 2000, ma20: 151.5 },
-  { date: "Jan 5", price: 156.7, volume: 2181, ma20: 152.8 },
-  { date: "Jan 6", price: 155.2, volume: 2500, ma20: 153.9 },
-  { date: "Jan 7", price: 157.8, volume: 2100, ma20: 155.2 },
-  { date: "Jan 8", price: 159.4, volume: 2300, ma20: 156.5 },
-  { date: "Jan 9", price: 158.9, volume: 2400, ma20: 157.6 },
-  { date: "Jan 10", price: 161.2, volume: 2210, ma20: 158.8 },
-]
-
-const volumeData = [
-  { date: "Jan 1", volume: 2400, avgVolume: 2200 },
-  { date: "Jan 2", volume: 2210, avgVolume: 2200 },
-  { date: "Jan 3", volume: 2290, avgVolume: 2200 },
-  { date: "Jan 4", volume: 2000, avgVolume: 2200 },
-  { date: "Jan 5", volume: 2181, avgVolume: 2200 },
-  { date: "Jan 6", volume: 2500, avgVolume: 2200 },
-  { date: "Jan 7", volume: 2100, avgVolume: 2200 },
-  { date: "Jan 8", volume: 2300, avgVolume: 2200 },
-  { date: "Jan 9", volume: 2400, avgVolume: 2200 },
-  { date: "Jan 10", volume: 2210, avgVolume: 2200 },
-]
+import { Search, TrendingUp, TrendingDown, Activity, Loader2 } from "lucide-react"
+import { getStockAnalysis, getStockHistory } from "@/lib/api"
+import PageLoader from "@/components/ui/page-loader"
 
 export default function StockAnalysis() {
-  const [selectedStock, setSelectedStock] = useState("AAPL")
-  const [timeframe, setTimeframe] = useState("1M")
+  const [searchInput, setSearchInput] = useState("RELIANCE")
+  const [symbol, setSymbol] = useState("RELIANCE")
+  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<any>(null)
+  const [history, setHistory] = useState<any[]>([])
+  const [error, setError] = useState("")
+  const [period, setPeriod] = useState("6mo")
+
+  const fetchData = async (sym: string, per: string) => {
+    setLoading(true)
+    setError("")
+    try {
+      const [analysisRes, histRes] = await Promise.all([
+        getStockAnalysis(sym),
+        getStockHistory(sym, per),
+      ])
+      setData(analysisRes)
+      setHistory(histRes)
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || "Failed to fetch data. Check the symbol.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchData(symbol, period) }, [symbol, period])
+
+  const handleSearch = () => {
+    if (searchInput.trim()) {
+      setSymbol(searchInput.trim().toUpperCase())
+    }
+  }
+
+  const stock = data?.stock
+  const technicals = data?.technicals
+  const indicators = technicals?.indicators
+  const patterns = technicals?.patterns || []
+  const sr = technicals?.support_resistance
+
+  const priceChange = stock ? (stock.price - stock.prev_close) : 0
+  const priceChangePct = stock?.prev_close ? ((priceChange / stock.prev_close) * 100) : 0
+  const isUp = priceChange >= 0
+
+  // Prepare chart data from history
+  const chartData = history.map((h: any) => ({
+    date: h.date.slice(5), // MM-DD
+    price: h.close,
+    volume: h.volume,
+  }))
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <Navbar />
-
       <main className="flex-1 w-full py-8">
         <div className="container space-y-8">
-          {/* Header Section */}
+          {/* Header */}
           <div className="space-y-6">
             <div>
-              <h1 className="text-4xl font-bold text-foreground mb-2">
-                Stock Analysis
-              </h1>
-              <p className="text-muted-foreground">
-                Deep dive into technical and fundamental analysis with real-time data
-              </p>
+              <h1 className="text-4xl font-bold text-foreground mb-2">Stock Analysis</h1>
+              <p className="text-muted-foreground">Real-time technical analysis for NSE stocks with AI-powered pattern detection</p>
             </div>
-
-            {/* Search and Filters */}
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
-                  placeholder="Search stock symbol (e.g., AAPL, GOOGL, MSFT)"
+                  placeholder="Enter NSE symbol (e.g., RELIANCE, TCS, INFY)"
                   className="pl-10"
-                  value={selectedStock}
-                  onChange={(e) => setSelectedStock(e.target.value.toUpperCase())}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                 />
               </div>
-              <div className="flex gap-2">
-                {["1D", "1W", "1M", "3M", "1Y", "5Y"].map((tf) => (
-                  <Button
-                    key={tf}
-                    variant={timeframe === tf ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setTimeframe(tf)}
-                    className="text-xs"
-                  >
-                    {tf}
-                  </Button>
-                ))}
-              </div>
+              <Button onClick={handleSearch} disabled={loading}>
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Analyze"}
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              {["1mo", "3mo", "6mo", "1y"].map((p) => (
+                <Button key={p} variant={period === p ? "default" : "outline"} size="sm" onClick={() => setPeriod(p)}>
+                  {p.toUpperCase()}
+                </Button>
+              ))}
             </div>
           </div>
 
-          {/* Stock Header */}
-          <div className="space-y-4">
-            <div className="flex items-end justify-between">
-              <div>
-                <h2 className="text-3xl font-bold text-foreground">
-                  {selectedStock}
-                </h2>
-                <p className="text-muted-foreground text-sm">
-                  Apple Inc. • NASDAQ
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-4xl font-bold text-foreground">$161.20</p>
-                <p className="text-accent-success font-semibold flex items-center justify-end gap-1">
-                  <TrendingUp className="w-4 h-4" />
-                  +7.35% (10 days)
-                </p>
-              </div>
-            </div>
-          </div>
+          {error && <Card className="p-6 text-center text-red-500">{error}</Card>}
 
-          {/* Key Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              label="Current Price"
-              value="$161.20"
-              change={7.35}
-              trend="up"
-              icon={<TrendingUp className="w-5 h-5 text-accent-success" />}
+          {loading && (
+            <PageLoader
+              words={["Connecting", "NSE", "Fetching", symbol, "Analyzing", "Patterns", "Crunching"]}
+              message={`Pulling real-time data for ${symbol} from NSE...`}
             />
-            <StatCard
-              label="Market Cap"
-              value="$2.5T"
-              icon={<Activity className="w-5 h-5 text-primary" />}
-            />
-            <StatCard
-              label="Volume"
-              value="52.3M"
-              change={-3.2}
-              trend="down"
-              icon={<Volume2 className="w-5 h-5 text-accent-alert" />}
-            />
-            <StatCard
-              label="P/E Ratio"
-              value="28.5"
-              icon={<Activity className="w-5 h-5 text-primary" />}
-            />
-          </div>
+          )}
 
-          {/* Charts Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Price Chart - Full Width */}
-            <Card className="lg:col-span-3 p-6">
-              <div className="space-y-4">
+          {!loading && stock && (
+            <>
+              {/* Stock Header */}
+              <div className="flex items-end justify-between flex-wrap gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    Price Movement
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Last 10 days with 20-day moving average
-                  </p>
+                  <h2 className="text-3xl font-bold text-foreground">{stock.symbol}</h2>
+                  <p className="text-muted-foreground text-sm">{stock.name} • {stock.sector}</p>
                 </div>
-                <ResponsiveContainer width="100%" height={400}>
-                  <ComposedChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis dataKey="date" stroke="#6B7280" />
-                    <YAxis stroke="#6B7280" domain={["dataMin - 5", "dataMax + 5"]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#FFFFFF",
-                        border: "1px solid #E5E7EB",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Area
-                      type="monotone"
-                      dataKey="price"
-                      fill="#10B981"
-                      stroke="#10B981"
-                      fillOpacity={0.1}
-                      name="Price"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="ma20"
-                      stroke="#3B82F6"
-                      strokeWidth={2}
-                      dot={false}
-                      name="20-Day MA"
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-
-            {/* Volume Chart */}
-            <Card className="lg:col-span-2 p-6">
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground">
-                    Trading Volume
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Daily volume vs average
-                  </p>
-                </div>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={volumeData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis dataKey="date" stroke="#6B7280" />
-                    <YAxis stroke="#6B7280" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#FFFFFF",
-                        border: "1px solid #E5E7EB",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Legend />
-                    <Bar dataKey="volume" fill="#10B981" name="Volume" />
-                    <Bar
-                      dataKey="avgVolume"
-                      fill="#E5E7EB"
-                      name="Avg Volume"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-
-            {/* Technical Indicators */}
-            <Card className="p-6">
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-foreground">
-                  Technical Indicators
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center pb-3 border-b border-border">
-                    <span className="text-sm text-muted-foreground">RSI (14)</span>
-                    <span className="font-semibold text-foreground">65.2</span>
-                  </div>
-                  <div className="flex justify-between items-center pb-3 border-b border-border">
-                    <span className="text-sm text-muted-foreground">MACD</span>
-                    <span className="font-semibold text-accent-success">Bullish</span>
-                  </div>
-                  <div className="flex justify-between items-center pb-3 border-b border-border">
-                    <span className="text-sm text-muted-foreground">Bollinger Bands</span>
-                    <span className="font-semibold text-foreground">Upper</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Stochastic</span>
-                    <span className="font-semibold text-foreground">72.5</span>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Analysis Summary */}
-          <Card className="p-6">
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-foreground">
-                Analysis Summary
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <h4 className="font-semibold text-foreground mb-2">
-                    Sentiment
-                  </h4>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-accent-success" />
-                    <span className="text-sm text-foreground">Bullish</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Strong uptrend with positive momentum
-                  </p>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-foreground mb-2">
-                    Support Level
-                  </h4>
-                  <p className="text-sm font-mono text-foreground">$155.50</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Key support identified
-                  </p>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-foreground mb-2">
-                    Resistance Level
-                  </h4>
-                  <p className="text-sm font-mono text-foreground">$165.00</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Watch for breakout
+                <div className="text-right">
+                  <p className="text-4xl font-bold text-foreground">₹{stock.price?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
+                  <p className={`font-semibold flex items-center justify-end gap-1 ${isUp ? "text-green-600" : "text-red-500"}`}>
+                    {isUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                    {isUp ? "+" : ""}{priceChange.toFixed(2)} ({priceChangePct.toFixed(2)}%)
                   </p>
                 </div>
               </div>
-            </div>
-          </Card>
 
-          {/* News Section */}
-          <Card className="p-6">
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-foreground">
-                Recent News
-              </h3>
-              <div className="space-y-4">
+              {/* Key Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  {
-                    title: "Apple Q4 Earnings Beat Expectations",
-                    date: "Jan 10, 2026",
-                    sentiment: "positive",
-                  },
-                  {
-                    title: "iPhone 15 Pro Sales Surge in Asia",
-                    date: "Jan 9, 2026",
-                    sentiment: "positive",
-                  },
-                  {
-                    title: "Tech Sector Faces Regulatory Scrutiny",
-                    date: "Jan 8, 2026",
-                    sentiment: "negative",
-                  },
-                ].map((news, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-start gap-4 pb-4 border-b border-border last:border-0"
-                  >
-                    <div
-                      className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
-                        news.sentiment === "positive"
-                          ? "bg-accent-success"
-                          : "bg-accent-alert"
-                      }`}
-                    />
-                    <div className="flex-1">
-                      <h4 className="font-medium text-foreground">
-                        {news.title}
-                      </h4>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {news.date}
-                      </p>
-                    </div>
-                  </div>
+                  { label: "Market Cap", value: stock.market_cap ? `₹${(stock.market_cap / 10000000).toFixed(0)} Cr` : "N/A" },
+                  { label: "P/E Ratio", value: stock.pe_ratio?.toFixed(2) || "N/A" },
+                  { label: "52W High", value: `₹${stock.fifty_two_week_high?.toLocaleString("en-IN")}` },
+                  { label: "52W Low", value: `₹${stock.fifty_two_week_low?.toLocaleString("en-IN")}` },
+                ].map((m) => (
+                  <Card key={m.label} className="p-4">
+                    <p className="text-xs text-muted-foreground">{m.label}</p>
+                    <p className="text-lg font-bold text-foreground mt-1">{m.value}</p>
+                  </Card>
                 ))}
               </div>
-            </div>
-          </Card>
+
+              {/* Price Chart */}
+              {chartData.length > 0 && (
+                <Card className="p-6">
+                  <h3 className="text-lg font-semibold mb-4">Price Movement — {symbol}</h3>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <ComposedChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                      <XAxis dataKey="date" stroke="#6B7280" tick={{ fontSize: 12 }} />
+                      <YAxis stroke="#6B7280" domain={["dataMin - 10", "dataMax + 10"]} />
+                      <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #E5E7EB", borderRadius: "8px" }} />
+                      <Legend />
+                      <Area type="monotone" dataKey="price" fill="#10B981" stroke="#10B981" fillOpacity={0.1} name="Close Price (₹)" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Card>
+              )}
+
+              {/* Volume Chart */}
+              {chartData.length > 0 && (
+                <Card className="p-6">
+                  <h3 className="text-lg font-semibold mb-4">Trading Volume</h3>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                      <XAxis dataKey="date" stroke="#6B7280" tick={{ fontSize: 12 }} />
+                      <YAxis stroke="#6B7280" />
+                      <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #E5E7EB", borderRadius: "8px" }} />
+                      <Bar dataKey="volume" fill="#6366F1" name="Volume" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Card>
+              )}
+
+              {/* Technical Indicators + Patterns */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Indicators */}
+                {indicators && (
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Technical Indicators</h3>
+                    <div className="space-y-3">
+                      {[
+                        { label: "RSI (14)", value: indicators.rsi, signal: indicators.rsi_signal },
+                        { label: "MACD", value: indicators.macd, signal: indicators.macd_crossover },
+                        { label: "ADX", value: indicators.adx, signal: indicators.trend_strength + " Trend" },
+                        { label: "Stochastic %K", value: indicators.stoch_k, signal: indicators.stoch_k > 80 ? "Overbought" : indicators.stoch_k < 20 ? "Oversold" : "Neutral" },
+                        { label: "SMA 20", value: `₹${indicators.sma_20}`, signal: indicators.price_vs_sma20 },
+                        { label: "SMA 50", value: `₹${indicators.sma_50}`, signal: indicators.price_vs_sma50 },
+                        { label: "BB Upper", value: `₹${indicators.bb_upper}`, signal: "" },
+                        { label: "BB Lower", value: `₹${indicators.bb_lower}`, signal: "" },
+                        { label: "Volume Ratio", value: `${indicators.volume_ratio}x`, signal: indicators.volume_signal },
+                      ].map((row) => (
+                        <div key={row.label} className="flex justify-between items-center pb-2 border-b border-border last:border-0">
+                          <span className="text-sm text-muted-foreground">{row.label}</span>
+                          <div className="text-right">
+                            <span className="font-semibold text-foreground">{row.value}</span>
+                            {row.signal && (
+                              <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                                row.signal.includes("Bullish") || row.signal === "Above" || row.signal === "Oversold"
+                                  ? "bg-green-100 text-green-700"
+                                  : row.signal.includes("Bearish") || row.signal === "Below" || row.signal === "Overbought"
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-gray-100 text-gray-700"
+                              }`}>
+                                {row.signal}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Patterns Detected */}
+                <div className="space-y-6">
+                  {patterns.length > 0 && (
+                    <Card className="p-6">
+                      <h3 className="text-lg font-semibold mb-4">🔍 Patterns Detected</h3>
+                      <div className="space-y-4">
+                        {patterns.map((p: any, i: number) => (
+                          <div key={i} className={`p-4 rounded-lg border-l-4 ${
+                            p.type === "Bullish" ? "border-green-500 bg-green-50" :
+                            p.type === "Bearish" ? "border-red-500 bg-red-50" :
+                            "border-yellow-500 bg-yellow-50"
+                          }`}>
+                            <div className="flex justify-between items-start">
+                              <h4 className="font-semibold">{p.name}</h4>
+                              <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                                p.type === "Bullish" ? "bg-green-200 text-green-800" :
+                                p.type === "Bearish" ? "bg-red-200 text-red-800" :
+                                "bg-yellow-200 text-yellow-800"
+                              }`}>{p.type}</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-2">{p.description}</p>
+                            <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                              <span>Confidence: {p.confidence}%</span>
+                              <span>Backtest Win Rate: {p.backtest_winrate}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Support & Resistance */}
+                  {sr && (
+                    <Card className="p-6">
+                      <h3 className="text-lg font-semibold mb-4">Support & Resistance</h3>
+                      <div className="space-y-2">
+                        {[
+                          { label: "Resistance 2", value: sr.resistance_2, color: "text-red-500" },
+                          { label: "Resistance 1", value: sr.resistance_1, color: "text-red-400" },
+                          { label: "Pivot", value: sr.pivot, color: "text-blue-500" },
+                          { label: "Support 1", value: sr.support_1, color: "text-green-400" },
+                          { label: "Support 2", value: sr.support_2, color: "text-green-500" },
+                        ].map((level) => (
+                          <div key={level.label} className="flex justify-between items-center py-2 border-b border-border last:border-0">
+                            <span className="text-sm text-muted-foreground">{level.label}</span>
+                            <span className={`font-mono font-semibold ${level.color}`}>₹{level.value?.toLocaleString("en-IN")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </div>
+
+              {/* Signal Summary */}
+              {technicals?.signal_summary && (
+                <Card className="p-6 bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+                  <h3 className="text-lg font-semibold mb-2">📊 AI Signal Summary</h3>
+                  <p className="text-foreground text-lg">{technicals.signal_summary}</p>
+                </Card>
+              )}
+            </>
+          )}
         </div>
       </main>
-
       <Footer />
     </div>
   )

@@ -3,7 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState, useCallback } from "react";
+import Preloader from "@/components/ui/preloader";
 
 // Lazy load pages for optimal performance
 const Home = lazy(() => import("./pages/Home"));
@@ -55,10 +56,16 @@ function Router() {
  * - Error boundary for graceful error handling
  */
 function App() {
+  const [showPreloader, setShowPreloader] = useState(true);
+  const handlePreloaderComplete = useCallback(() => {
+    setShowPreloader(false);
+  }, []);
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
+          {showPreloader && <Preloader onComplete={handlePreloaderComplete} />}
           <Toaster />
           <Router />
         </TooltipProvider>
