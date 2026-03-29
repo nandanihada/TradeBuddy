@@ -4,7 +4,12 @@
  */
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api" });
+const api = axios.create({ 
+  baseURL: import.meta.env.PROD 
+    ? "https://tradebuddy-api-i6sm.onrender.com" 
+    : "/api" 
+});
+
 
 // Market
 export const getMarketOverview = () => api.get("/market/overview").then((r) => r.data);
