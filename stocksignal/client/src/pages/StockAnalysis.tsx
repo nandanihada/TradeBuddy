@@ -5,25 +5,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ComposedChart, Area, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar,
 } from "recharts"
-import { Search, TrendingUp, TrendingDown, Activity, Loader2 } from "lucide-react"
+import { Search, TrendingUp, TrendingDown, Loader2, ChevronDown, ChevronUp } from "lucide-react"
 import { getStockAnalysis, getStockHistory } from "@/lib/api"
 import PageLoader from "@/components/ui/page-loader"
 
 export default function StockAnalysis() {
-  const [searchInput, setSearchInput] = useState("RELIANCE")
-  const [symbol, setSymbol] = useState("RELIANCE")
+  const [searchInput, setSearchInput] = useState("")
+  const [symbol, setSymbol] = useState("")
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<any>(null)
   const [history, setHistory] = useState<any[]>([])
   const [error, setError] = useState("")
   const [period, setPeriod] = useState("6mo")
+  const [showDetails, setShowDetails] = useState(false)
+  const [showChart, setShowChart] = useState(false)
+  const [showReasons, setShowReasons] = useState(false)
 
   const fetchData = async (sym: string, per: string) => {
+    if (!sym) return
     setLoading(true)
     setError("")
+    setShowDetails(false)
+    setShowChart(false)
+    setShowReasons(false)
     try {
       const [analysisRes, histRes] = await Promise.all([
         getStockAnalysis(sym),
@@ -32,247 +38,262 @@ export default function StockAnalysis() {
       setData(analysisRes)
       setHistory(histRes)
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Failed to fetch data. Check the symbol.")
+      setError(e?.response?.data?.detail || "Couldn't fetch data. Check the stock name and try again.")
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchData(symbol, period) }, [symbol, period])
+  // Only fetch when period changes AND we already have a symbol selected
+  useEffect(() => { if (symbol) fetchData(symbol, period) }, [period])
 
   const handleSearch = () => {
-    if (searchInput.trim()) {
-      setSymbol(searchInput.trim().toUpperCase())
+    const sym = searchInput.trim().toUpperCase()
+    if (sym) {
+      setSymbol(sym)
+      fetchData(sym, period)
     }
   }
 
+  const handleSuggestionClick = (sym: string) => {
+    setSearchInput(sym)
+    setSymbol(sym)
+    fetchData(sym, period)
+  }
+
+  const popularStocks = [
+    { symbol: "RELIANCE", name: "Reliance Industries" },
+    { symbol: "TCS", name: "Tata Consultancy" },
+    { symbol: "HDFCBANK", name: "HDFC Bank" },
+    { symbol: "INFY", name: "Infosys" },
+    { symbol: "ICICIBANK", name: "ICICI Bank" },
+    { symbol: "SBIN", name: "State Bank of India" },
+    { symbol: "TATAMOTORS", name: "Tata Motors" },
+    { symbol: "ITC", name: "ITC Limited" },
+    { symbol: "BAJFINANCE", name: "Bajaj Finance" },
+    { symbol: "TITAN", name: "Titan Company" },
+    { symbol: "WIPRO", name: "Wipro" },
+    { symbol: "SUNPHARMA", name: "Sun Pharma" },
+  ]
+
   const stock = data?.stock
+  const rec = data?.recommendation
   const technicals = data?.technicals
   const indicators = technicals?.indicators
   const patterns = technicals?.patterns || []
-  const sr = technicals?.support_resistance
 
-  const priceChange = stock ? (stock.price - stock.prev_close) : 0
-  const priceChangePct = stock?.prev_close ? ((priceChange / stock.prev_close) * 100) : 0
-  const isUp = priceChange >= 0
+  const chartData = history.map((h: any) => ({ date: h.date?.slice(5), price: h.close, volume: h.volume }))
 
-  // Prepare chart data from history
-  const chartData = history.map((h: any) => ({
-    date: h.date.slice(5), // MM-DD
-    price: h.close,
-    volume: h.volume,
-  }))
+  const verdictColor = rec?.verdict === "BUY" ? "bg-green-500" : rec?.verdict === "AVOID" ? "bg-red-500" : "bg-yellow-500"
+  const verdictBg = rec?.verdict === "BUY" ? "bg-green-50 border-green-200" : rec?.verdict === "AVOID" ? "bg-red-50 border-red-200" : "bg-yellow-50 border-yellow-200"
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <Navbar />
       <main className="flex-1 w-full py-8">
-        <div className="container space-y-8">
-          {/* Header */}
-          <div className="space-y-6">
-            <div>
-              <h1 className="text-4xl font-bold text-foreground mb-2">Stock Analysis</h1>
-              <p className="text-muted-foreground">Real-time technical analysis for NSE stocks with AI-powered pattern detection</p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-4">
+        <div className="container max-w-3xl mx-auto space-y-6">
+          {/* Search */}
+          <div className="text-center space-y-4">
+            <h1 className="text-3xl font-bold">Should I buy this stock? 🤔</h1>
+            <p className="text-muted-foreground">Type any NSE stock name and AI will tell you in simple words</p>
+            <div className="flex gap-3 max-w-lg mx-auto">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
-                  placeholder="Enter NSE symbol (e.g., RELIANCE, TCS, INFY)"
-                  className="pl-10"
+                  placeholder="e.g. RELIANCE, TCS, INFY, TATAMOTORS"
+                  className="pl-10 h-12 text-lg"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                 />
               </div>
-              <Button onClick={handleSearch} disabled={loading}>
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Analyze"}
+              <Button onClick={handleSearch} disabled={loading} className="h-12 px-6">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Ask AI"}
               </Button>
-            </div>
-            <div className="flex gap-2">
-              {["1mo", "3mo", "6mo", "1y"].map((p) => (
-                <Button key={p} variant={period === p ? "default" : "outline"} size="sm" onClick={() => setPeriod(p)}>
-                  {p.toUpperCase()}
-                </Button>
-              ))}
             </div>
           </div>
 
           {error && <Card className="p-6 text-center text-red-500">{error}</Card>}
 
+          {/* Popular Stock Suggestions — shown when no stock is selected */}
+          {!symbol && !loading && (
+            <div className="space-y-4">
+              <p className="text-center text-muted-foreground">👇 Pick a stock or type any NSE symbol above</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {popularStocks.map((s) => (
+                  <button
+                    key={s.symbol}
+                    onClick={() => handleSuggestionClick(s.symbol)}
+                    className="p-4 rounded-xl border border-border hover:border-primary hover:bg-primary/5 transition-all text-left group"
+                  >
+                    <p className="font-semibold text-foreground group-hover:text-primary">{s.symbol}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{s.name}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {loading && (
             <PageLoader
-              words={["Connecting", "NSE", "Fetching", symbol, "Analyzing", "Patterns", "Crunching"]}
-              message={`Pulling real-time data for ${symbol} from NSE...`}
+              words={["Checking", symbol, "Analyzing", "Thinking", "Almost done"]}
+              message={`AI is analyzing ${symbol} for you...`}
             />
           )}
 
-          {!loading && stock && (
+          {!loading && rec && stock && (
             <>
-              {/* Stock Header */}
-              <div className="flex items-end justify-between flex-wrap gap-4">
-                <div>
-                  <h2 className="text-3xl font-bold text-foreground">{stock.symbol}</h2>
-                  <p className="text-muted-foreground text-sm">{stock.name} • {stock.sector}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-4xl font-bold text-foreground">₹{stock.price?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p>
-                  <p className={`font-semibold flex items-center justify-end gap-1 ${isUp ? "text-green-600" : "text-red-500"}`}>
-                    {isUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                    {isUp ? "+" : ""}{priceChange.toFixed(2)} ({priceChangePct.toFixed(2)}%)
+              {/* THE VERDICT — Layer 1 */}
+              <Card className={`p-8 ${verdictBg} border-2`}>
+                <div className="text-center space-y-4">
+                  <div className={`inline-block px-6 py-2 rounded-full text-white font-bold text-xl ${verdictColor}`}>
+                    {rec.verdict === "BUY" ? "✅ BUY" : rec.verdict === "AVOID" ? "❌ AVOID" : "⏳ WAIT"}
+                  </div>
+                  <h2 className="text-2xl font-bold">{symbol} — ₹{stock.price?.toLocaleString("en-IN")}</h2>
+                  <p className={`text-lg font-medium ${stock.change_pct >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {stock.change_pct >= 0 ? "📈" : "📉"} {stock.change_pct >= 0 ? "+" : ""}{stock.change_pct?.toFixed(2)}% today
                   </p>
+                  <p className="text-xl font-medium text-foreground">{rec.quick}</p>
                 </div>
-              </div>
+              </Card>
 
-              {/* Key Metrics */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: "Market Cap", value: stock.market_cap ? `₹${(stock.market_cap / 10000000).toFixed(0)} Cr` : "N/A" },
-                  { label: "P/E Ratio", value: stock.pe_ratio?.toFixed(2) || "N/A" },
-                  { label: "52W High", value: `₹${stock.fifty_two_week_high?.toLocaleString("en-IN")}` },
-                  { label: "52W Low", value: `₹${stock.fifty_two_week_low?.toLocaleString("en-IN")}` },
-                ].map((m) => (
-                  <Card key={m.label} className="p-4">
-                    <p className="text-xs text-muted-foreground">{m.label}</p>
-                    <p className="text-lg font-bold text-foreground mt-1">{m.value}</p>
-                  </Card>
-                ))}
-              </div>
+              {/* SIMPLE EXPLANATION — Layer 2 */}
+              <Card className="p-6">
+                <h3 className="font-semibold text-lg mb-3">💬 In simple words:</h3>
+                <p className="text-foreground text-lg leading-relaxed">{rec.explanation}</p>
+                {rec.entry_price && (
+                  <div className="mt-4 grid grid-cols-3 gap-4 text-center">
+                    <div className="p-3 bg-green-50 rounded-lg">
+                      <p className="text-xs text-muted-foreground">Buy around</p>
+                      <p className="font-bold text-green-700">{rec.entry_price}</p>
+                    </div>
+                    <div className="p-3 bg-red-50 rounded-lg">
+                      <p className="text-xs text-muted-foreground">Stop Loss</p>
+                      <p className="font-bold text-red-700">{rec.stop_loss || "N/A"}</p>
+                    </div>
+                    <div className="p-3 bg-blue-50 rounded-lg">
+                      <p className="text-xs text-muted-foreground">Target</p>
+                      <p className="font-bold text-blue-700">{rec.target || "N/A"}</p>
+                    </div>
+                  </div>
+                )}
+                {rec.confidence > 0 && (
+                  <div className="mt-4 flex items-center gap-3">
+                    <span className="text-sm text-muted-foreground">AI Confidence:</span>
+                    <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${rec.confidence > 70 ? "bg-green-500" : rec.confidence > 40 ? "bg-yellow-500" : "bg-red-500"}`} style={{ width: `${rec.confidence}%` }} />
+                    </div>
+                    <span className="text-sm font-semibold">{rec.confidence}%</span>
+                  </div>
+                )}
+              </Card>
 
-              {/* Price Chart */}
-              {chartData.length > 0 && (
-                <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Price Movement — {symbol}</h3>
-                  <ResponsiveContainer width="100%" height={400}>
-                    <ComposedChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                      <XAxis dataKey="date" stroke="#6B7280" tick={{ fontSize: 12 }} />
-                      <YAxis stroke="#6B7280" domain={["dataMin - 10", "dataMax + 10"]} />
-                      <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #E5E7EB", borderRadius: "8px" }} />
-                      <Legend />
-                      <Area type="monotone" dataKey="price" fill="#10B981" stroke="#10B981" fillOpacity={0.1} name="Close Price (₹)" />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+              {/* EXPANDABLE SECTIONS — Layer 3 & 4 */}
+
+              {/* Show Reasons */}
+              {rec.detailed_reasons && rec.detailed_reasons.length > 0 && (
+                <Card className="overflow-hidden">
+                  <button onClick={() => setShowReasons(!showReasons)} className="w-full p-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                    <span className="font-semibold">📋 Why? (See the reasons)</span>
+                    {showReasons ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                  </button>
+                  {showReasons && (
+                    <div className="px-6 pb-6 space-y-3">
+                      {rec.detailed_reasons.map((reason: string, i: number) => (
+                        <div key={i} className="flex gap-3 items-start">
+                          <span className="text-lg">{i === 0 ? "1️⃣" : i === 1 ? "2️⃣" : "3️⃣"}</span>
+                          <p className="text-foreground">{reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </Card>
               )}
 
-              {/* Volume Chart */}
-              {chartData.length > 0 && (
-                <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Trading Volume</h3>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                      <XAxis dataKey="date" stroke="#6B7280" tick={{ fontSize: 12 }} />
-                      <YAxis stroke="#6B7280" />
-                      <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #E5E7EB", borderRadius: "8px" }} />
-                      <Bar dataKey="volume" fill="#6366F1" name="Volume" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Card>
-              )}
+              {/* Show Chart */}
+              <Card className="overflow-hidden">
+                <button onClick={() => setShowChart(!showChart)} className="w-full p-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                  <span className="font-semibold">📊 Show me the chart</span>
+                  {showChart ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
+                {showChart && chartData.length > 0 && (
+                  <div className="px-4 pb-6">
+                    <div className="flex gap-2 mb-4 justify-center">
+                      {["1mo", "3mo", "6mo", "1y"].map((p) => (
+                        <Button key={p} variant={period === p ? "default" : "outline"} size="sm" onClick={() => setPeriod(p)}>
+                          {p.toUpperCase()}
+                        </Button>
+                      ))}
+                    </div>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis dataKey="date" stroke="#6B7280" tick={{ fontSize: 11 }} />
+                        <YAxis stroke="#6B7280" domain={["dataMin - 20", "dataMax + 20"]} />
+                        <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #E5E7EB", borderRadius: "8px" }} />
+                        <Area type="monotone" dataKey="price" fill={stock.change_pct >= 0 ? "#10B981" : "#EF4444"} stroke={stock.change_pct >= 0 ? "#10B981" : "#EF4444"} fillOpacity={0.1} name="Price (₹)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </Card>
 
-              {/* Technical Indicators + Patterns */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Indicators */}
-                {indicators && (
-                  <Card className="p-6">
-                    <h3 className="text-lg font-semibold mb-4">Technical Indicators</h3>
-                    <div className="space-y-3">
+              {/* Show Technical Details */}
+              <Card className="overflow-hidden">
+                <button onClick={() => setShowDetails(!showDetails)} className="w-full p-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                  <span className="font-semibold">🔬 Show me the numbers (for nerds)</span>
+                  {showDetails ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
+                {showDetails && indicators && (
+                  <div className="px-6 pb-6">
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-muted-foreground">52W High</p>
+                        <p className="font-bold">₹{stock.fifty_two_week_high?.toLocaleString("en-IN")}</p>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-muted-foreground">52W Low</p>
+                        <p className="font-bold">₹{stock.fifty_two_week_low?.toLocaleString("en-IN")}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
                       {[
                         { label: "RSI (14)", value: indicators.rsi, signal: indicators.rsi_signal },
                         { label: "MACD", value: indicators.macd, signal: indicators.macd_crossover },
-                        { label: "ADX", value: indicators.adx, signal: indicators.trend_strength + " Trend" },
-                        { label: "Stochastic %K", value: indicators.stoch_k, signal: indicators.stoch_k > 80 ? "Overbought" : indicators.stoch_k < 20 ? "Oversold" : "Neutral" },
-                        { label: "SMA 20", value: `₹${indicators.sma_20}`, signal: indicators.price_vs_sma20 },
-                        { label: "SMA 50", value: `₹${indicators.sma_50}`, signal: indicators.price_vs_sma50 },
-                        { label: "BB Upper", value: `₹${indicators.bb_upper}`, signal: "" },
-                        { label: "BB Lower", value: `₹${indicators.bb_lower}`, signal: "" },
-                        { label: "Volume Ratio", value: `${indicators.volume_ratio}x`, signal: indicators.volume_signal },
-                      ].map((row) => (
-                        <div key={row.label} className="flex justify-between items-center pb-2 border-b border-border last:border-0">
+                        { label: "ADX", value: indicators.adx, signal: indicators.trend_strength },
+                        { label: "SMA 20", value: indicators.sma_20 ? `₹${indicators.sma_20}` : "N/A" },
+                        { label: "SMA 50", value: indicators.sma_50 ? `₹${indicators.sma_50}` : "N/A" },
+                        { label: "Bollinger Upper", value: indicators.bb_upper ? `₹${indicators.bb_upper}` : "N/A" },
+                        { label: "Bollinger Lower", value: indicators.bb_lower ? `₹${indicators.bb_lower}` : "N/A" },
+                      ].filter(r => r.value !== undefined).map((row) => (
+                        <div key={row.label} className="flex justify-between items-center py-2 border-b border-border last:border-0">
                           <span className="text-sm text-muted-foreground">{row.label}</span>
-                          <div className="text-right">
-                            <span className="font-semibold text-foreground">{row.value}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">{row.value}</span>
                             {row.signal && (
-                              <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                                row.signal.includes("Bullish") || row.signal === "Above" || row.signal === "Oversold"
-                                  ? "bg-green-100 text-green-700"
-                                  : row.signal.includes("Bearish") || row.signal === "Below" || row.signal === "Overbought"
-                                  ? "bg-red-100 text-red-700"
-                                  : "bg-gray-100 text-gray-700"
-                              }`}>
-                                {row.signal}
-                              </span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                row.signal?.includes("Bullish") || row.signal === "Oversold" ? "bg-green-100 text-green-700" :
+                                row.signal?.includes("Bearish") || row.signal === "Overbought" ? "bg-red-100 text-red-700" :
+                                "bg-gray-100 text-gray-700"
+                              }`}>{row.signal}</span>
                             )}
                           </div>
                         </div>
                       ))}
                     </div>
-                  </Card>
-                )}
-
-                {/* Patterns Detected */}
-                <div className="space-y-6">
-                  {patterns.length > 0 && (
-                    <Card className="p-6">
-                      <h3 className="text-lg font-semibold mb-4">🔍 Patterns Detected</h3>
-                      <div className="space-y-4">
+                    {patterns.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <p className="font-semibold text-sm">Patterns Detected:</p>
                         {patterns.map((p: any, i: number) => (
-                          <div key={i} className={`p-4 rounded-lg border-l-4 ${
-                            p.type === "Bullish" ? "border-green-500 bg-green-50" :
-                            p.type === "Bearish" ? "border-red-500 bg-red-50" :
-                            "border-yellow-500 bg-yellow-50"
-                          }`}>
-                            <div className="flex justify-between items-start">
-                              <h4 className="font-semibold">{p.name}</h4>
-                              <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                                p.type === "Bullish" ? "bg-green-200 text-green-800" :
-                                p.type === "Bearish" ? "bg-red-200 text-red-800" :
-                                "bg-yellow-200 text-yellow-800"
-                              }`}>{p.type}</span>
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-2">{p.description}</p>
-                            <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                              <span>Confidence: {p.confidence}%</span>
-                              <span>Backtest Win Rate: {p.backtest_winrate}%</span>
-                            </div>
+                          <div key={i} className={`p-3 rounded-lg text-sm ${p.type === "Bullish" ? "bg-green-50" : p.type === "Bearish" ? "bg-red-50" : "bg-yellow-50"}`}>
+                            <span className="font-medium">{p.name}</span> — {p.description}
                           </div>
                         ))}
                       </div>
-                    </Card>
-                  )}
-
-                  {/* Support & Resistance */}
-                  {sr && (
-                    <Card className="p-6">
-                      <h3 className="text-lg font-semibold mb-4">Support & Resistance</h3>
-                      <div className="space-y-2">
-                        {[
-                          { label: "Resistance 2", value: sr.resistance_2, color: "text-red-500" },
-                          { label: "Resistance 1", value: sr.resistance_1, color: "text-red-400" },
-                          { label: "Pivot", value: sr.pivot, color: "text-blue-500" },
-                          { label: "Support 1", value: sr.support_1, color: "text-green-400" },
-                          { label: "Support 2", value: sr.support_2, color: "text-green-500" },
-                        ].map((level) => (
-                          <div key={level.label} className="flex justify-between items-center py-2 border-b border-border last:border-0">
-                            <span className="text-sm text-muted-foreground">{level.label}</span>
-                            <span className={`font-mono font-semibold ${level.color}`}>₹{level.value?.toLocaleString("en-IN")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </Card>
-                  )}
-                </div>
-              </div>
-
-              {/* Signal Summary */}
-              {technicals?.signal_summary && (
-                <Card className="p-6 bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
-                  <h3 className="text-lg font-semibold mb-2">📊 AI Signal Summary</h3>
-                  <p className="text-foreground text-lg">{technicals.signal_summary}</p>
-                </Card>
-              )}
+                    )}
+                  </div>
+                )}
+              </Card>
             </>
           )}
         </div>

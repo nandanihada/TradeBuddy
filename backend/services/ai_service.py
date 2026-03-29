@@ -1,147 +1,164 @@
 """
-AI Service — Google Gemini integration.
-Powers the Market ChatGPT, signal enrichment, and pattern explanations.
+AI Service — Groq (Llama 3.1 70B).
+Super fast, free, perfect for hackathon.
 """
 import os
-import google.generativeai as genai
-from typing import Optional
+from groq import Groq
 
-_model = None
+_client = None
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        api_key = os.getenv("GEMINI_API_KEY", "")
-        if not api_key or api_key == "your_gemini_api_key_here":
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key or api_key == "your_groq_api_key_here":
             return None
-        genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel("gemini-2.0-flash")
-    return _model
+        _client = Groq(api_key=api_key)
+    return _client
 
 
-SYSTEM_PROMPT = """You are TradeBuddy AI, an expert Indian stock market analyst.
-You provide actionable insights for NSE/BSE stocks.
+SYSTEM_PROMPT = """You are TradeBuddy AI — a friendly, smart stock market buddy for Indian investors.
 
-Rules:
-- Always cite data sources (NSE, BSE, quarterly results, etc.)
-- Give specific numbers — price levels, percentages, volumes
-- Be direct and actionable — "Buy above ₹X with SL at ₹Y" style
-- Mention risks alongside opportunities
-- Use Indian market terminology (Nifty, Sensex, FII/DII, etc.)
-- Format responses with clear sections
-- If you don't have real-time data, say so clearly
-- Never guarantee returns — always mention that markets carry risk
+YOUR PERSONALITY:
+- Talk like a smart friend, NOT a finance textbook
+- Use simple Hindi-English mix when natural (like "yeh stock abhi thoda overheated hai")
+- Be direct: YES buy / NO don't buy / WAIT for better price
+- Use ₹ for prices, Cr for crores
+- Keep it short. No walls of text.
+
+RESPONSE STYLE:
+1. Quick Answer — One line: Buy / Wait / Avoid with one reason
+2. Simple Explanation — 2-3 sentences in plain language
+3. Offer to show more — chart analysis, detailed numbers
+
+RULES:
+- NEVER use jargon without explaining it
+- Instead of "RSI is 72 indicating overbought" say "Stock went up too fast, usually takes a breather"
+- Instead of "MACD bearish crossover" say "Momentum is slowing down"
+- Always mention risk
+- Use emojis naturally: ✅ ❌ ⚠️ 📈 📉
+- Format with markdown
 """
 
 
 async def chat_with_market_context(
     user_message: str,
-    market_context: Optional[str] = None,
-    chat_history: Optional[list] = None,
+    market_context: str = "",
+    chat_history: list = None,
 ) -> str:
-    """Send a message to Gemini with market context."""
-    model = _get_model()
-    if model is None:
-        return "⚠️ AI service not configured. Please add your GEMINI_API_KEY to the .env file."
+    """Chat with TradeBuddy AI via Groq."""
+    client = _get_client()
+    if client is None:
+        return "⚠️ AI not configured. Add GROQ_API_KEY to backend/.env\n\nGet your free key at https://console.groq.com/keys"
 
-    prompt_parts = [SYSTEM_PROMPT]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     if market_context:
-        prompt_parts.append(f"\n\nCurrent Market Context:\n{market_context}")
+        messages.append({"role": "system", "content": f"Current Market Data:\n{market_context}"})
 
     if chat_history:
-        prompt_parts.append("\n\nConversation History:")
-        for msg in chat_history[-6:]:  # Keep last 6 messages for context
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            prompt_parts.append(f"{role}: {content}")
+        for msg in chat_history[-6:]:
+            messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
 
-    prompt_parts.append(f"\n\nUser: {user_message}\n\nAssistant:")
+    messages.append({"role": "user", "content": user_message})
 
     try:
-        response = model.generate_content("\n".join(prompt_parts))
-        return response.text
+        response = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=messages,
+            temperature=0.8,
+            max_tokens=2048,
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        return f"Error generating response: {str(e)}"
+        return f"⚠️ AI error: {str(e)}"
 
 
-async def enrich_signal(signal_data: dict) -> str:
-    """AI enrichment step — takes a raw signal and adds context + actionable advice."""
-    model = _get_model()
-    if model is None:
-        return "AI enrichment unavailable. Configure GEMINI_API_KEY."
+async def get_buy_recommendation(symbol: str, stock_data: dict, technicals: dict) -> dict:
+    """Should I buy this stock? Returns layered response via Groq AI."""
+    client = _get_client()
+    if client is None:
+        return {"verdict": "WAIT", "quick": "⚠️ AI not available — using rule-based analysis", "explanation": "", "confidence": 0}
 
-    prompt = f"""{SYSTEM_PROMPT}
+    price = stock_data.get("price", 0)
+    change_pct = stock_data.get("change_pct", 0)
+    high_52w = stock_data.get("fifty_two_week_high", 0)
+    low_52w = stock_data.get("fifty_two_week_low", 0)
+    ind = technicals.get("indicators", {})
+    patterns = technicals.get("patterns", [])
+    signal = technicals.get("signal_summary", "")
 
-You are performing Step 2 of a 3-step agentic analysis pipeline.
-Step 1 (Signal Detection) found the following signal:
+    context = f"""Stock: {symbol}
+Price: ₹{price} | Change: {change_pct:+.2f}%
+52W High: ₹{high_52w} | Low: ₹{low_52w}
+RSI: {ind.get('rsi', 'N/A')} ({ind.get('rsi_signal', '')})
+MACD: {ind.get('macd_crossover', 'N/A')}
+ADX: {ind.get('adx', 'N/A')} ({ind.get('trend_strength', '')})
+SMA20: ₹{ind.get('sma_20', 'N/A')} | SMA50: ₹{ind.get('sma_50', 'N/A')}
+Patterns: {', '.join(p['name'] for p in patterns) if patterns else 'None'}
+Signal: {signal}"""
 
-Signal: {signal_data.get('title', 'Unknown')}
-Type: {signal_data.get('type', 'Unknown')}
-Stock: {signal_data.get('symbol', 'Unknown')}
-Details: {signal_data.get('description', 'No details')}
-Data: {signal_data.get('raw_data', '{}')}
+    prompt = f"""Based on this data, should someone buy {symbol}?
 
-Your job (Step 2 — Enrichment):
-1. Explain WHY this signal matters in plain English
-2. Provide historical context — what happened last time this signal appeared for this stock?
-3. Assess the signal strength (Strong/Medium/Weak)
-4. Give a specific actionable recommendation
+{context}
 
-Keep it concise — 3-4 paragraphs max. Use ₹ for prices."""
+Reply in this EXACT JSON format only:
+{{"verdict":"BUY or WAIT or AVOID","quick":"one line answer like telling a friend","explanation":"2-3 simple sentences why","entry_price":"₹X","stop_loss":"₹X","target":"₹X","risk_level":"Low/Medium/High","confidence":70,"detailed_reasons":["reason 1","reason 2","reason 3"]}}
 
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Enrichment failed: {str(e)}"
-
-
-async def generate_alert(signal_data: dict, enrichment: str) -> dict:
-    """Step 3 — Generate a structured actionable alert from enriched signal."""
-    model = _get_model()
-    if model is None:
-        return {
-            "alert_title": signal_data.get("title", "Signal Detected"),
-            "action": "Review manually",
-            "reasoning": "AI not configured",
-            "risk_level": "Unknown",
-        }
-
-    prompt = f"""{SYSTEM_PROMPT}
-
-You are performing Step 3 of a 3-step agentic analysis pipeline.
-
-Original Signal: {signal_data.get('title', '')}
-Stock: {signal_data.get('symbol', '')}
-Enrichment Analysis: {enrichment}
-
-Generate a structured JSON alert with these exact fields:
-- alert_title: One-line alert headline
-- action: Specific action (e.g., "BUY above ₹2450 with SL ₹2380, Target ₹2600")
-- reasoning: 2-3 sentence reasoning
-- risk_level: "Low", "Medium", or "High"
-- time_horizon: "Intraday", "Short-term (1-2 weeks)", "Medium-term (1-3 months)"
-- confidence: A number 1-100
-
-Return ONLY valid JSON, no markdown formatting."""
+ONLY return valid JSON. No markdown. No explanation outside JSON."""
 
     try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        # Try to parse JSON from response
+        response = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+            max_tokens=512,
+        )
+        text = response.choices[0].message.content.strip()
         import json
-        # Remove markdown code blocks if present
         if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         return json.loads(text)
-    except Exception:
+    except Exception as e:
         return {
-            "alert_title": signal_data.get("title", "Signal Detected"),
-            "action": "Review the signal manually",
-            "reasoning": enrichment[:200] if enrichment else "Analysis pending",
-            "risk_level": "Medium",
-            "time_horizon": "Short-term",
-            "confidence": 50,
+            "verdict": "WAIT",
+            "quick": f"AI couldn't analyze right now: {str(e)[:100]}",
+            "explanation": "",
+            "confidence": 0,
         }
+
+
+async def generate_morning_briefing(market_data: dict, signals: list) -> str:
+    """Generate conversational morning briefing via Groq."""
+    client = _get_client()
+    if client is None:
+        return "⚠️ AI not available for briefing generation."
+
+    prompt = f"""Write a morning market briefing for an Indian investor who knows NOTHING about stocks.
+
+Market: {market_data}
+Signals: {signals[:5]}
+
+Format like a WhatsApp message from a smart friend:
+- Greeting + market mood (1 line)
+- 3 key things today (numbered, 2 lines each)
+- One actionable suggestion
+- Under 200 words, use emojis, mix Hindi-English naturally"""
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.9,
+            max_tokens=1024,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Couldn't generate briefing: {str(e)}"

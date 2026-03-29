@@ -15,6 +15,8 @@ export const getTopMovers = (limit = 10) =>
 // Stock Analysis
 export const getStockAnalysis = (symbol: string) =>
   api.get(`/analysis/${symbol}`).then((r) => r.data);
+export const getQuickVerdict = (symbol: string) =>
+  api.get(`/analysis/${symbol}/quick`).then((r) => r.data);
 export const getStockDetail = (symbol: string) =>
   api.get(`/analysis/${symbol}/detail`).then((r) => r.data);
 export const getStockTechnicals = (symbol: string) =>

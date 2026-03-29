@@ -1,9 +1,10 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { lazy, Suspense, useState, useCallback } from "react";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { lazy, Suspense, useState, useCallback, type ComponentType } from "react";
 import Preloader from "@/components/ui/preloader";
 
 // Lazy load pages for optimal performance
@@ -27,18 +28,33 @@ function LoadingFallback() {
   );
 }
 
+// Protected route wrapper — redirects to /login if not authenticated
+function ProtectedRoute({ component: Component, path }: { component: ComponentType; path: string }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingFallback />;
+  if (!user) return <Redirect to="/login" />;
+  return <Route path={path} component={Component} />;
+}
+
+// Guest-only route — redirects to /analysis if already logged in
+function GuestRoute({ component: Component, path }: { component: ComponentType; path: string }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingFallback />;
+  if (user) return <Redirect to="/analysis" />;
+  return <Route path={path} component={Component} />;
+}
+
 function Router() {
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Switch>
         <Route path="/" component={Home} />
-        <Route path="/analysis" component={StockAnalysis} />
-        <Route path="/briefing" component={MorningBriefing} />
-        <Route path="/tracker" component={BigMoneyTracker} />
-        <Route path="/signup" component={SignUp} />
-        <Route path="/login" component={Login} />
+        <ProtectedRoute path="/analysis" component={StockAnalysis} />
+        <ProtectedRoute path="/briefing" component={MorningBriefing} />
+        <ProtectedRoute path="/tracker" component={BigMoneyTracker} />
+        <GuestRoute path="/signup" component={SignUp} />
+        <GuestRoute path="/login" component={Login} />
         <Route path="/404" component={NotFound} />
-        {/* Final fallback route */}
         <Route component={NotFound} />
       </Switch>
     </Suspense>
@@ -63,13 +79,15 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          {showPreloader && <Preloader onComplete={handlePreloaderComplete} />}
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
+      <AuthProvider>
+        <ThemeProvider defaultTheme="light">
+          <TooltipProvider>
+            {showPreloader && <Preloader onComplete={handlePreloaderComplete} />}
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </ThemeProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
