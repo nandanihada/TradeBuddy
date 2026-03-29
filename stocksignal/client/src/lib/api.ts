@@ -13,10 +13,14 @@ export const getTopMovers = (limit = 10) =>
   api.get(`/market/movers?limit=${limit}`).then((r) => r.data);
 
 // Stock Analysis
-export const getStockAnalysis = (symbol: string) =>
-  api.get(`/analysis/${symbol}`).then((r) => r.data);
-export const getQuickVerdict = (symbol: string) =>
-  api.get(`/analysis/${symbol}/quick`).then((r) => r.data);
+export const getStockAnalysis = (symbol: string) => {
+  const lang = localStorage.getItem("tradebuddy_lang") || "en";
+  return api.get(`/analysis/${symbol}?lang=${lang}`).then((r) => r.data);
+}
+export const getQuickVerdict = (symbol: string) => {
+  const lang = localStorage.getItem("tradebuddy_lang") || "en";
+  return api.get(`/analysis/${symbol}/quick?lang=${lang}`).then((r) => r.data);
+}
 export const getStockDetail = (symbol: string) =>
   api.get(`/analysis/${symbol}/detail`).then((r) => r.data);
 export const getStockTechnicals = (symbol: string) =>

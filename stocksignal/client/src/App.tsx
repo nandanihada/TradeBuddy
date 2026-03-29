@@ -6,6 +6,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { lazy, Suspense, useState, useCallback, type ComponentType } from "react";
 import Preloader from "@/components/ui/preloader";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 // Lazy load pages for optimal performance
 const Home = lazy(() => import("./pages/Home"));
@@ -28,11 +29,26 @@ function LoadingFallback() {
   );
 }
 
-// Protected route wrapper — redirects to /login if not authenticated
+// Protected route wrapper — redirects to /login if not authenticated, shows language picker if needed
 function ProtectedRoute({ component: Component, path }: { component: ComponentType; path: string }) {
   const { user, loading } = useAuth();
+  const [lang, setLang] = useState(() => localStorage.getItem("tradebuddy_lang") || "");
+
   if (loading) return <LoadingFallback />;
   if (!user) return <Redirect to="/login" />;
+
+  // Show language selector if user hasn't picked one yet
+  if (!lang) {
+    return (
+      <LanguageSelector
+        onSelect={(selectedLang) => {
+          localStorage.setItem("tradebuddy_lang", selectedLang);
+          setLang(selectedLang);
+        }}
+      />
+    );
+  }
+
   return <Route path={path} component={Component} />;
 }
 

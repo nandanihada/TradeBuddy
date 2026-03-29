@@ -11,10 +11,29 @@ const navItems = [
   { label: "Big Money Tracker", href: "/tracker" },
 ]
 
+const langLabels: Record<string, string> = {
+  en: "🇬🇧 EN",
+  hi: "🇮🇳 हिंदी",
+  hinglish: "🇮🇳🇬🇧 Hinglish",
+  ta: "🇮🇳 தமிழ்",
+  te: "🇮🇳 తెలుగు",
+  bn: "🇮🇳 বাংলা",
+  mr: "🇮🇳 मराठी",
+  gu: "🇮🇳 ગુજરાતી",
+}
+
 export function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const { user, signOut } = useAuth()
   const [, setLocation] = useLocation()
+  const [currentLang, setCurrentLang] = useState(() => localStorage.getItem("tradebuddy_lang") || "en")
+  const [showLangMenu, setShowLangMenu] = useState(false)
+
+  const changeLang = (code: string) => {
+    localStorage.setItem("tradebuddy_lang", code)
+    setCurrentLang(code)
+    setShowLangMenu(false)
+  }
 
   return (
     <nav className="sticky top-0 z-50 w-full bg-white border-b border-border shadow-sm">
@@ -60,6 +79,28 @@ export function Navbar() {
         <div className="hidden md:flex items-center gap-3">
           {user ? (
             <>
+              {/* Language Switcher */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowLangMenu(!showLangMenu)}
+                  className="text-xs px-2 py-1 rounded-md border border-border hover:bg-gray-50 transition-colors"
+                >
+                  {langLabels[currentLang] || "🌐 Lang"}
+                </button>
+                {showLangMenu && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-border rounded-lg shadow-lg py-1 z-50 min-w-[140px]">
+                    {Object.entries(langLabels).map(([code, label]) => (
+                      <button
+                        key={code}
+                        onClick={() => changeLang(code)}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${currentLang === code ? "bg-primary/5 font-semibold" : ""}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <span className="text-sm text-muted-foreground">{user.email?.split("@")[0]}</span>
               <NavbarAvatar />
               <Button variant="outline" size="sm" onClick={() => { signOut(); setLocation("/") }}>

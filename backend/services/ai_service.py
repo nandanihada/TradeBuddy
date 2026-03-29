@@ -65,7 +65,7 @@ async def chat_with_market_context(
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=0.8,
             max_tokens=2048,
@@ -75,11 +75,21 @@ async def chat_with_market_context(
         return f"⚠️ AI error: {str(e)}"
 
 
-async def get_buy_recommendation(symbol: str, stock_data: dict, technicals: dict) -> dict:
+async def get_buy_recommendation(symbol: str, stock_data: dict, technicals: dict, lang: str = "en") -> dict:
     """Should I buy this stock? Returns layered response via Groq AI."""
     client = _get_client()
     if client is None:
         return {"verdict": "WAIT", "quick": "⚠️ AI not available — using rule-based analysis", "explanation": "", "confidence": 0}
+
+    lang_instruction = {
+        "hi": "RESPOND ENTIRELY IN HINDI (Devanagari script). Use ₹ for prices.",
+        "hinglish": "RESPOND IN HINGLISH (mix of Hindi and English, Roman script). Example: 'Yeh stock abhi thoda overheated hai, wait karo'. Use ₹ for prices.",
+        "ta": "RESPOND IN TAMIL. Use ₹ for prices.",
+        "te": "RESPOND IN TELUGU. Use ₹ for prices.",
+        "bn": "RESPOND IN BENGALI. Use ₹ for prices.",
+        "mr": "RESPOND IN MARATHI. Use ₹ for prices.",
+        "gu": "RESPOND IN GUJARATI. Use ₹ for prices.",
+    }.get(lang, "Respond in English. Use ₹ for prices.")
 
     price = stock_data.get("price", 0)
     change_pct = stock_data.get("change_pct", 0)
@@ -103,6 +113,8 @@ Signal: {signal}"""
 
 {context}
 
+IMPORTANT LANGUAGE INSTRUCTION: {lang_instruction}
+
 Reply in this EXACT JSON format only:
 {{"verdict":"BUY or WAIT or AVOID","quick":"one line answer like telling a friend","explanation":"2-3 simple sentences why","entry_price":"₹X","stop_loss":"₹X","target":"₹X","risk_level":"Low/Medium/High","confidence":70,"detailed_reasons":["reason 1","reason 2","reason 3"]}}
 
@@ -110,7 +122,7 @@ ONLY return valid JSON. No markdown. No explanation outside JSON."""
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -151,7 +163,7 @@ Format like a WhatsApp message from a smart friend:
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},

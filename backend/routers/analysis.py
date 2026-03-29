@@ -7,18 +7,28 @@ router = APIRouter()
 
 
 @router.get("/{symbol}")
-async def stock_analysis(symbol: str):
-    """Full analysis: quote + technicals. AI recommendation is separate."""
+async def stock_analysis(symbol: str, lang: str = "en"):
+    """Full analysis: quote + technicals + AI recommendation."""
     try:
         quote = await get_quote(symbol)
 
-        # Try technicals but don't block if history is unavailable
         try:
             technicals = await get_technical_analysis(symbol)
         except Exception:
             technicals = {"indicators": {}, "patterns": [], "signal_summary": "Technical data loading..."}
 
-        rec = _simple_recommendation(symbol, quote, technicals)
+        # Try Groq AI first, fall back to rule-based
+        rec = None
+        try:
+            from services.ai_service import get_buy_recommendation
+            rec = await get_buy_recommendation(symbol, quote, technicals, lang)
+            if not rec or not rec.get("verdict") or rec.get("confidence", 0) == 0:
+                rec = None
+        except Exception:
+            rec = None
+
+        if not rec:
+            rec = _simple_recommendation(symbol, quote, technicals, lang)
 
         return {
             "stock": quote,
@@ -50,7 +60,7 @@ async def stock_history(symbol: str, period: str = "6mo"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _simple_recommendation(symbol: str, quote: dict, technicals: dict) -> dict:
+def _simple_recommendation(symbol: str, quote: dict, technicals: dict, lang: str = "en") -> dict:
     """Rule-based recommendation — instant, no AI needed."""
     ind = technicals.get("indicators", {})
     patterns = technicals.get("patterns", [])
@@ -88,31 +98,71 @@ def _simple_recommendation(symbol: str, quote: dict, technicals: dict) -> dict:
 
     if score >= 65:
         verdict = "BUY"
-        quick = f"✅ {symbol} looks good right now. Momentum is in your favor."
+        if lang == "hi":
+            quick = f"✅ {symbol} अभी अच्छा दिख रहा है। खरीदने का अच्छा मौका हो सकता है।"
+        elif lang == "hinglish":
+            quick = f"✅ {symbol} abhi accha dikh raha hai. Momentum aapke favor mein hai."
+        else:
+            quick = f"✅ {symbol} looks good right now. Momentum is in your favor."
     elif score <= 35:
         verdict = "AVOID"
-        quick = f"❌ {symbol} is not looking great. Better to wait for a dip."
+        if lang == "hi":
+            quick = f"❌ {symbol} अभी अच्छा नहीं दिख रहा। गिरावट का इंतज़ार करें।"
+        elif lang == "hinglish":
+            quick = f"❌ {symbol} abhi accha nahi dikh raha. Dip ka wait karo."
+        else:
+            quick = f"❌ {symbol} is not looking great. Better to wait for a dip."
     else:
         verdict = "WAIT"
-        quick = f"⏳ {symbol} has mixed signals. Wait for a clearer picture."
+        if lang == "hi":
+            quick = f"⏳ {symbol} में मिले-जुले संकेत हैं। स्पष्ट तस्वीर का इंतज़ार करें।"
+        elif lang == "hinglish":
+            quick = f"⏳ {symbol} mein mixed signals hain. Clear picture ka wait karo."
+        else:
+            quick = f"⏳ {symbol} has mixed signals. Wait for a clearer picture."
 
     reasons = []
-    if rsi > 70: reasons.append("Stock has gone up too fast recently (RSI overbought) — it usually takes a breather after this.")
-    elif rsi < 30: reasons.append("Stock has dropped a lot (RSI oversold) — could bounce back from here.")
-    if ind.get("macd_crossover") == "Bullish": reasons.append("Buying momentum is picking up — more people are buying than selling.")
-    elif ind.get("macd_crossover") == "Bearish": reasons.append("Selling pressure is increasing — momentum is fading.")
-    if high_52w and price > high_52w * 0.95: reasons.append(f"Price is very close to its 52-week high of ₹{high_52w}. Risky to buy at the top.")
-    if low_52w and price < low_52w * 1.1: reasons.append(f"Price is near its 52-week low of ₹{low_52w}. Could be a good entry point.")
-    if not reasons: reasons.append("No strong signals either way. The stock is in a neutral zone.")
+    if lang == "hi":
+        if rsi > 70: reasons.append("स्टॉक बहुत तेज़ी से बढ़ा है (RSI ओवरबॉट) — आमतौर पर इसके बाद थोड़ा गिरता है।")
+        elif rsi < 30: reasons.append("स्टॉक काफी गिर चुका है (RSI ओवरसोल्ड) — यहाँ से वापसी हो सकती है।")
+        if ind.get("macd_crossover") == "Bullish": reasons.append("खरीदारी का दबाव बढ़ रहा है — ज़्यादा लोग खरीद रहे हैं।")
+        elif ind.get("macd_crossover") == "Bearish": reasons.append("बिकवाली का दबाव बढ़ रहा है — momentum कम हो रहा है।")
+        if high_52w and price > high_52w * 0.95: reasons.append(f"कीमत 52-हफ्ते के हाई ₹{high_52w} के करीब है। टॉप पर खरीदना रिस्की है।")
+        if low_52w and price < low_52w * 1.1: reasons.append(f"कीमत 52-हफ्ते के लो ₹{low_52w} के करीब है। अच्छा एंट्री पॉइंट हो सकता है।")
+        if not reasons: reasons.append("कोई मज़बूत संकेत नहीं है। स्टॉक न्यूट्रल ज़ोन में है।")
+    elif lang == "hinglish":
+        if rsi > 70: reasons.append("Stock bahut tezi se badha hai (RSI overbought) — usually iske baad thoda girta hai.")
+        elif rsi < 30: reasons.append("Stock kaafi gir chuka hai (RSI oversold) — yahan se wapsi ho sakti hai.")
+        if ind.get("macd_crossover") == "Bullish": reasons.append("Buying momentum badh raha hai — zyada log kharid rahe hain.")
+        elif ind.get("macd_crossover") == "Bearish": reasons.append("Selling pressure badh raha hai — momentum kam ho raha hai.")
+        if high_52w and price > high_52w * 0.95: reasons.append(f"Price 52-week high ₹{high_52w} ke paas hai. Top pe kharidna risky hai.")
+        if low_52w and price < low_52w * 1.1: reasons.append(f"Price 52-week low ₹{low_52w} ke paas hai. Accha entry point ho sakta hai.")
+        if not reasons: reasons.append("Koi strong signal nahi hai. Stock neutral zone mein hai.")
+    else:
+        if rsi > 70: reasons.append("Stock has gone up too fast recently (RSI overbought) — it usually takes a breather after this.")
+        elif rsi < 30: reasons.append("Stock has dropped a lot (RSI oversold) — could bounce back from here.")
+        if ind.get("macd_crossover") == "Bullish": reasons.append("Buying momentum is picking up — more people are buying than selling.")
+        elif ind.get("macd_crossover") == "Bearish": reasons.append("Selling pressure is increasing — momentum is fading.")
+        if high_52w and price > high_52w * 0.95: reasons.append(f"Price is very close to its 52-week high of ₹{high_52w}. Risky to buy at the top.")
+        if low_52w and price < low_52w * 1.1: reasons.append(f"Price is near its 52-week low of ₹{low_52w}. Could be a good entry point.")
+        if not reasons: reasons.append("No strong signals either way. The stock is in a neutral zone.")
 
     sma20 = ind.get("sma_20", price)
-    explanation = f"{symbol} is at ₹{price}. "
-    if verdict == "BUY":
-        explanation += f"The stock is showing positive momentum and trading above key levels. A good time to consider buying."
-    elif verdict == "AVOID":
-        explanation += f"The stock is showing weakness. Better to wait for it to stabilize before buying."
+    if lang == "hi":
+        explanation = f"{symbol} अभी ₹{price} पर है। "
+        if verdict == "BUY": explanation += "स्टॉक में अच्छी तेज़ी दिख रही है। खरीदने पर विचार कर सकते हैं।"
+        elif verdict == "AVOID": explanation += "स्टॉक कमज़ोर दिख रहा है। स्थिर होने का इंतज़ार करें।"
+        else: explanation += "संकेत मिले-जुले हैं। न तेज़ी न मंदी।"
+    elif lang == "hinglish":
+        explanation = f"{symbol} abhi ₹{price} pe hai. "
+        if verdict == "BUY": explanation += "Stock mein acchi tezi dikh rahi hai. Kharidne pe consider kar sakte ho."
+        elif verdict == "AVOID": explanation += "Stock kamzor dikh raha hai. Stable hone ka wait karo."
+        else: explanation += "Signals mixed hain. Na tezi na mandi."
     else:
-        explanation += f"Signals are mixed right now. Neither strongly bullish nor bearish."
+        explanation = f"{symbol} is at ₹{price}. "
+        if verdict == "BUY": explanation += "The stock is showing positive momentum and trading above key levels. A good time to consider buying."
+        elif verdict == "AVOID": explanation += "The stock is showing weakness. Better to wait for it to stabilize before buying."
+        else: explanation += "Signals are mixed right now. Neither strongly bullish nor bearish."
 
     return {
         "verdict": verdict,
