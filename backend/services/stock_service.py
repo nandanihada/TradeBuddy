@@ -1,17 +1,23 @@
 """
 Stock data service using yfinance.
 Fetches real NSE/BSE stock data, historical prices, and fundamentals.
+Includes retry logic and rate-limit protection.
 """
 import yfinance as yf
 import pandas as pd
+import asyncio
+import time
 from cachetools import TTLCache
 from datetime import datetime, timedelta
 from typing import Optional
 
-# Cache stock data for 5 minutes to avoid rate limits
-_cache = TTLCache(maxsize=200, ttl=300)
+# Cache stock data for 10 minutes to reduce Yahoo Finance hits
+_cache = TTLCache(maxsize=500, ttl=600)
 
-# Major NSE indices and popular stocks
+# Rate limiter: track last request time
+_last_request_time = 0
+_MIN_DELAY = 0.5  # 500ms between yfinance calls
+
 NIFTY_50_SYMBOLS = [
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
     "HINDUNILVR.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS", "ITC.NS",
@@ -29,8 +35,63 @@ INDEX_SYMBOLS = {
 }
 
 
-def _get_ticker(symbol: str) -> yf.Ticker:
-    return yf.Ticker(symbol)
+def _rate_limit():
+    """Simple rate limiter to avoid 429 errors."""
+    global _last_request_time
+    now = time.time()
+    elapsed = now - _last_request_time
+    if elapsed < _MIN_DELAY:
+        time.sleep(_MIN_DELAY - elapsed)
+    _last_request_time = time.time()
+
+
+def _safe_history(symbol: str, period: str = "2d", retries: int = 2) -> pd.DataFrame:
+    """Fetch history with retry, rate limiting, and download fallback."""
+    for attempt in range(retries):
+        try:
+            _rate_limit()
+            # Try yf.download first — uses a different API endpoint, less rate-limited
+            df = yf.download(symbol, period=period, progress=False, threads=False)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+        try:
+            _rate_limit()
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period=period)
+            if not hist.empty:
+                return hist
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(3 * (attempt + 1))
+            continue
+    return pd.DataFrame()
+
+
+def _safe_info(symbol: str, retries: int = 2) -> dict:
+    """Fetch ticker fast_info (lightweight, less rate-limited than .info)."""
+    for attempt in range(retries):
+        try:
+            _rate_limit()
+            ticker = yf.Ticker(symbol)
+            fi = ticker.fast_info
+            return {
+                "currentPrice": getattr(fi, "last_price", 0),
+                "previousClose": getattr(fi, "previous_close", 0),
+                "open": getattr(fi, "open", 0),
+                "dayHigh": getattr(fi, "day_high", 0),
+                "dayLow": getattr(fi, "day_low", 0),
+                "marketCap": getattr(fi, "market_cap", 0),
+                "fiftyTwoWeekHigh": getattr(fi, "year_high", 0),
+                "fiftyTwoWeekLow": getattr(fi, "year_low", 0),
+                "currency": getattr(fi, "currency", "INR"),
+            }
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(2 * (attempt + 1))
+            continue
+    return {}
 
 
 async def get_index_data() -> dict:
@@ -42,8 +103,7 @@ async def get_index_data() -> dict:
     results = {}
     for name, symbol in INDEX_SYMBOLS.items():
         try:
-            ticker = _get_ticker(symbol)
-            hist = ticker.history(period="2d")
+            hist = _safe_history(symbol, "5d")
             if len(hist) >= 2:
                 current = float(hist["Close"].iloc[-1])
                 prev = float(hist["Close"].iloc[-2])
@@ -69,23 +129,40 @@ async def get_top_movers(limit: int = 10) -> dict:
     if cache_key in _cache:
         return _cache[cache_key]
 
+    # Use batch download for efficiency — single request for all symbols
+    try:
+        _rate_limit()
+        data = yf.download(
+            " ".join(NIFTY_50_SYMBOLS),
+            period="5d",
+            group_by="ticker",
+            threads=False,  # Sequential to avoid rate limits
+            progress=False,
+        )
+    except Exception:
+        return {"gainers": [], "losers": []}
+
     stocks = []
     for symbol in NIFTY_50_SYMBOLS:
         try:
-            ticker = _get_ticker(symbol)
-            hist = ticker.history(period="2d")
-            if len(hist) >= 2:
-                current = float(hist["Close"].iloc[-1])
-                prev = float(hist["Close"].iloc[-2])
-                change_pct = ((current - prev) / prev) * 100
-                name = symbol.replace(".NS", "")
-                stocks.append({
-                    "symbol": name,
-                    "price": round(current, 2),
-                    "change": round(current - prev, 2),
-                    "change_pct": round(change_pct, 2),
-                    "volume": int(hist["Volume"].iloc[-1]),
-                })
+            name = symbol.replace(".NS", "")
+            ticker_data = data[symbol] if symbol in data.columns.get_level_values(0) else None
+            if ticker_data is None or ticker_data.empty:
+                continue
+            close = ticker_data["Close"].dropna()
+            if len(close) < 2:
+                continue
+            current = float(close.iloc[-1])
+            prev = float(close.iloc[-2])
+            change_pct = ((current - prev) / prev) * 100
+            vol = ticker_data["Volume"].dropna()
+            stocks.append({
+                "symbol": name,
+                "price": round(current, 2),
+                "change": round(current - prev, 2),
+                "change_pct": round(change_pct, 2),
+                "volume": int(vol.iloc[-1]) if len(vol) > 0 else 0,
+            })
         except Exception:
             continue
 
@@ -99,39 +176,63 @@ async def get_top_movers(limit: int = 10) -> dict:
 
 
 async def get_stock_detail(symbol: str) -> dict:
-    """Get detailed stock data including fundamentals."""
+    """Get detailed stock data. Uses fast_info + history (avoids heavy quoteSummary endpoint)."""
     ns_symbol = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
     cache_key = f"detail_{ns_symbol}"
     if cache_key in _cache:
         return _cache[cache_key]
 
-    ticker = _get_ticker(ns_symbol)
-    info = ticker.info
-    hist = ticker.history(period="1y")
+    # Get history first (most reliable)
+    hist = _safe_history(ns_symbol, "1y")
+
+    # Try fast_info (lightweight endpoint)
+    info = _safe_info(ns_symbol)
+
+    # Derive prices from history as fallback
+    current_price = info.get("currentPrice") or 0
+    prev_close = info.get("previousClose") or 0
+
+    if not current_price and not hist.empty:
+        current_price = float(hist["Close"].iloc[-1])
+    if not prev_close and len(hist) >= 2:
+        prev_close = float(hist["Close"].iloc[-2])
+
+    # Derive 52W from history
+    week_52_high = info.get("fiftyTwoWeekHigh") or 0
+    week_52_low = info.get("fiftyTwoWeekLow") or 0
+    if not week_52_high and not hist.empty:
+        week_52_high = round(float(hist["High"].max()), 2)
+        week_52_low = round(float(hist["Low"].min()), 2)
+
+    # Derive volume from history
+    volume = 0
+    avg_volume = 0
+    if not hist.empty:
+        volume = int(hist["Volume"].iloc[-1])
+        avg_volume = int(hist["Volume"].tail(20).mean())
 
     result = {
         "symbol": symbol.replace(".NS", ""),
-        "name": info.get("longName", symbol),
-        "sector": info.get("sector", "N/A"),
-        "industry": info.get("industry", "N/A"),
-        "price": info.get("currentPrice", info.get("regularMarketPrice", 0)),
-        "prev_close": info.get("previousClose", 0),
-        "open": info.get("open", 0),
-        "day_high": info.get("dayHigh", 0),
-        "day_low": info.get("dayLow", 0),
-        "volume": info.get("volume", 0),
-        "avg_volume": info.get("averageVolume", 0),
+        "name": symbol.replace(".NS", ""),
+        "sector": "NSE",
+        "industry": "N/A",
+        "price": round(current_price, 2) if current_price else 0,
+        "prev_close": round(prev_close, 2) if prev_close else 0,
+        "open": info.get("open") or (round(float(hist["Open"].iloc[-1]), 2) if not hist.empty else 0),
+        "day_high": info.get("dayHigh") or (round(float(hist["High"].iloc[-1]), 2) if not hist.empty else 0),
+        "day_low": info.get("dayLow") or (round(float(hist["Low"].iloc[-1]), 2) if not hist.empty else 0),
+        "volume": volume,
+        "avg_volume": avg_volume,
         "market_cap": info.get("marketCap", 0),
-        "pe_ratio": info.get("trailingPE", 0),
-        "pb_ratio": info.get("priceToBook", 0),
-        "dividend_yield": info.get("dividendYield", 0),
-        "fifty_two_week_high": info.get("fiftyTwoWeekHigh", 0),
-        "fifty_two_week_low": info.get("fiftyTwoWeekLow", 0),
-        "beta": info.get("beta", 0),
-        "eps": info.get("trailingEps", 0),
+        "pe_ratio": 0,
+        "pb_ratio": 0,
+        "dividend_yield": 0,
+        "fifty_two_week_high": week_52_high,
+        "fifty_two_week_low": week_52_low,
+        "beta": 0,
+        "eps": 0,
     }
 
-    # Historical data for charts
     if not hist.empty:
         result["history"] = [
             {
@@ -156,8 +257,10 @@ async def get_stock_history(symbol: str, period: str = "6mo") -> list:
     if cache_key in _cache:
         return _cache[cache_key]
 
-    ticker = _get_ticker(ns_symbol)
-    hist = ticker.history(period=period)
+    hist = _safe_history(ns_symbol, period)
+
+    if hist.empty:
+        return []
 
     data = [
         {

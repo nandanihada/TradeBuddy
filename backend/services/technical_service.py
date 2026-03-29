@@ -18,11 +18,11 @@ async def get_technical_analysis(symbol: str) -> dict:
     if cache_key in _cache:
         return _cache[cache_key]
 
-    ticker = yf.Ticker(ns_symbol)
-    df = ticker.history(period="1y")
+    from services.stock_service import _safe_history
+    df = _safe_history(ns_symbol, "1y")
 
     if df.empty or len(df) < 50:
-        return {"error": "Insufficient data for analysis"}
+        return {"error": "Insufficient data for analysis. Yahoo Finance may be rate-limited — try again in a minute."}
 
     result = {
         "symbol": symbol.replace(".NS", ""),
