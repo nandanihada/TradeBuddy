@@ -6,7 +6,7 @@ import axios from "axios";
 
 const api = axios.create({ 
   baseURL: import.meta.env.PROD 
-    ? "https://tradebuddy-api-i6sm.onrender.com" 
+    ? "https://tradebuddy-api-i6sm.onrender.com/api" 
     : "/api" 
 });
 
